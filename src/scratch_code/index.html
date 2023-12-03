@@ -16,7 +16,7 @@
             container: "map",
             style: "https://api.maptiler.com/maps/backdrop/style.json?key=6jk9aonLicRFoRqvljrc",
             center: [-114.0719, 51.0447],
-            zoom: 13,
+            zoom: 12,
             maxZoom: 20,
         });
 
@@ -30,11 +30,12 @@
             };
         }
 
+
         async function updateResults() {
             const bbox = fgBoundingBox();
             const fc = { type: "FeatureCollection", features: [] };
 
-            const iter = flatgeobuf.deserialize("https://cif-canada.s3.amazonaws.com/tree_features.fgb", bbox);
+            const iter = flatgeobuf.deserialize("https://cif-canada.s3.amazonaws.com/flatgeobuf/all_features_geometry.fgb", bbox);
             for await (let feature of iter) {
                 fc.features.push(feature);
             }
@@ -103,10 +104,19 @@
             }
         }
 
+        let debounceTimer;
+
+        function debounceUpdateResults() {
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(() => {
+                updateResults();
+            }, 1000); // Adjust the delay as needed
+        }
+
         map.on("load", () => {
             updateResults();
-            map.on("moveend", updateResults);
         });
+        map.on("moveend", debounceUpdateResults);
     </script>
 </body>
 </html>

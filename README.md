@@ -4,8 +4,7 @@
 ogr2ogr -f FlatGeobuf filename.fgb filename.geojson
 
 ## serve flatgeobuf file
-python -m http.server
-
 cd src
+python -m http.server
 
 localhost:8000

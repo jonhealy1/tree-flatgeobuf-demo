@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta content="text/html; charset=utf-8" http-equiv="Content-Type"/>
+    <link href="https://unpkg.com/maplibre-gl@2.1.9/dist/maplibre-gl.css" rel="stylesheet" />
+    <script src="https://unpkg.com/maplibre-gl@2.1.9/dist/maplibre-gl.js"></script>
+    <script src="https://unpkg.com/flatgeobuf@3.22.0/dist/flatgeobuf-geojson.min.js"></script>
+    <style>
+        #map { height: 100vh; }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <script type="module">
+        const map = new maplibregl.Map({
+            container: "map",
+            style: "https://api.maptiler.com/maps/backdrop/style.json?key=6jk9aonLicRFoRqvljrc",
+            center: [-114.0719, 51.0447],
+            zoom: 12,
+            maxZoom: 20,
+        });
+
+        let lastBbox = null;
+        let cumulativeFeatures = [];
+
+        function fgBoundingBox() {
+            const bounds = map.getBounds();
+            return {
+                minX: bounds.getWest(),
+                minY: bounds.getSouth(),
+                maxX: bounds.getEast(),
+                maxY: bounds.getNorth()
+            };
+        }
+
+        function doBboxesOverlap(bbox1, bbox2) {
+            if (!bbox1 || !bbox2) return false;
+            return !(bbox2.minX > bbox1.maxX || 
+                     bbox2.maxX < bbox1.minX || 
+                     bbox2.minY > bbox1.maxY || 
+                     bbox2.maxY < bbox1.minY);
+        }
+
+        function resetMapData() {
+            if (map.getSource("points")) {
+                map.removeLayer('clusters');
+                map.removeLayer('cluster-count');
+                map.removeLayer('unclustered-point');
+                map.removeSource("points");
+            }
+        }
+
+        async function updateResults() {
+            if (map.getZoom() < 12) {
+                console.log("Zoom level is below 12, not loading features");
+                return; // Do not load features if zoom level is below 12
+            }
+
+            const currentBbox = fgBoundingBox();
+            console.log("Current bbox: ", currentBbox);
+
+            if (!doBboxesOverlap(lastBbox, currentBbox)) {
+                console.log("Bboxes do not overlap, resetting map data");
+                resetMapData();
+                lastBbox = currentBbox;
+                cumulativeFeatures = []; // Reset cumulative features
+                await loadFeatures(currentBbox);
+            } else {
+                console.log("Bboxes overlap, loading additional features");
+                await loadAdditionalFeatures(currentBbox);
+            }
+        }
+        function arePointsEqual(point1, point2) {
+            console.log("1: ", point1, "2: ", point2)
+            return point1.x === point2.x && point1.y === point2.y;
+        }
+
+        async function loadAdditionalFeatures(bbox) {
+            const iter = flatgeobuf.deserialize("https://cif-canada.s3.amazonaws.com/flatgeobuf/all_features_geometry.fgb", bbox);
+        }
+        async function loadFeatures(bbox) {
+            if (!map.getSource("points")) {
+                const iter = flatgeobuf.deserialize("https://cif-canada.s3.amazonaws.com/flatgeobuf/all_features_geometry.fgb", bbox);
+                for await (let feature of iter) {
+                    cumulativeFeatures.push(feature);
+
+                    if (cumulativeFeatures.length % 10000 === 0) {
+                        updateMap({ type: "FeatureCollection", features: [...cumulativeFeatures] });
+                    }
+                }
+
+                if (cumulativeFeatures.length % 10000 !== 0) {
+                    updateMap({ type: "FeatureCollection", features: [...cumulativeFeatures] });
+                }
+            }
+        }
+
+        function updateMap(fc) {
+            if (!map.getSource("points")) {
+                console.log("Creating new source with features");
+                map.addSource("points", {
+                    type: "geojson",
+                    data: fc,
+                    cluster: true,
+                    clusterMaxZoom: 14,
+                    clusterRadius: 50
+                });
+                addMapLayers();
+            } else {
+                console.log("Updating existing source with new features");
+                map.getSource("points").setData(fc);
+            }
+        }
+
+        function addMapLayers() {
+            map.addLayer({
+                id: 'clusters',
+                type: 'circle',
+                source: 'points',
+                filter: ['has', 'point_count'],
+                paint: {
+                    'circle-color': [
+                        'step',
+                        ['get', 'point_count'],
+                        '#51bbd6',
+                        100,
+                        '#f1f075',
+                        750,
+                        '#f28cb1'
+                    ],
+                    'circle-radius': [
+                        'step',
+                        ['get', 'point_count'],
+                        20,
+                        100,
+                        30,
+                        750,
+                        40
+                    ]
+                }
+            });
+
+            map.addLayer({
+                id: 'cluster-count',
+                type: 'symbol',
+                source: 'points',
+                filter: ['has', 'point_count'],
+                layout: {
+                    'text-field': '{point_count_abbreviated}',
+                    'text-size': 12
+                }
+            });
+
+            map.addLayer({
+                id: 'unclustered-point',
+                type: 'circle',
+                source: 'points',
+                filter: ['!', ['has', 'point_count']],
+                paint: {
+                    'circle-color': '#11b4da',
+                    'circle-radius': 4,
+                    'circle-stroke-width': 1,
+                    'circle-stroke-color': '#fff'
+                }
+            });
+        }
+
+        let debounceTimer;
+
+        function debounceUpdateResults() {
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(() => {
+                updateResults();
+            }, 1000); // Adjust the delay as needed
+        }
+
+        map.on("load", () => {
+            updateResults();
+        });
+        map.on("moveend", debounceUpdateResults);
+    </script>
+</body>
+</html>

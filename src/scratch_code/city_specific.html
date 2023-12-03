@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta content="text/html; charset=utf-8" http-equiv="Content-Type"/>
+    <link href="https://unpkg.com/maplibre-gl@2.1.9/dist/maplibre-gl.css" rel="stylesheet" />
+    <script src="https://unpkg.com/maplibre-gl@2.1.9/dist/maplibre-gl.js"></script>
+    <script src="https://unpkg.com/flatgeobuf@3.22.0/dist/flatgeobuf-geojson.min.js"></script>
+    <style>
+        #map { height: 100vh; }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <script type="module">
+        const map = new maplibregl.Map({
+            container: "map",
+            style: "https://api.maptiler.com/maps/backdrop/style.json?key=6jk9aonLicRFoRqvljrc",
+            center: [-114.0719, 51.0447], // Starting at Calgary
+            zoom: 12,
+            maxZoom: 20,
+        });
+
+        const cityBounds = {
+            'Calgary': { minX: -114.316, minY: 50.842, maxX: -113.859, maxY: 51.212 },
+            'Vancouver': { minX: -123.224, minY: 49.198, maxX: -123.022, maxY: 49.316 },
+            'Edmonton': { minX: -113.718, minY: 53.413, maxX: -113.278, maxY: 53.657 }
+        };
+
+        let currentCity = null;
+
+        function isInsideCity(center, cityName) {
+            const bounds = cityBounds[cityName];
+            return center.lng >= bounds.minX && center.lng <= bounds.maxX &&
+                   center.lat >= bounds.minY && center.lat <= bounds.maxY;
+        }
+
+        async function updateResults() {
+            const center = map.getCenter();
+            const zoom = map.getZoom();
+            let newCity = null;
+
+            console.log("zoom: ", zoom)
+            console.log("center: ", center)
+
+            if (zoom > 10) {
+                if (isInsideCity(center, 'Calgary')) {
+                    newCity = 'Calgary';
+                } else if (isInsideCity(center, 'Vancouver')) {
+                    newCity = 'Vancouver';
+                } else if (isInsideCity(center, 'Edmonton')) {
+                    newCity = 'Edmonton';
+                }
+            }
+
+            if (newCity !== currentCity) {
+                currentCity = newCity;
+                if (currentCity) {
+                    console.log("city: ", currentCity)
+                    const url = `https://cif-canada.s3.amazonaws.com/flatgeobuf/${currentCity.toLowerCase()}_no_index.fgb`;
+                    const response = await fetch(url);
+                    console.log("response: ", response.body)
+                    const fc = { type: "FeatureCollection", features: [] };
+                    const iter = flatgeobuf.deserialize(response.body);
+                    for await (let feature of iter) {
+                        console.log(feature)
+                        fc.features.push(feature);
+                    }
+                    if (map.getSource("points")) {
+                        map.getSource("points").setData(fc);
+                    } else {
+                        map.addSource("points", {
+                            type: "geojson",
+                            data: fc,
+                            cluster: true,
+                            clusterMaxZoom: 14,
+                            clusterRadius: 50
+                        });
+
+                        map.addLayer({
+                            id: 'clusters',
+                            type: 'circle',
+                            source: 'points',
+                            filter: ['has', 'point_count'],
+                            paint: {
+                                'circle-color': [
+                                    'step',
+                                    ['get', 'point_count'],
+                                    '#51bbd6',
+                                    100,
+                                    '#f1f075',
+                                    750,
+                                    '#f28cb1'
+                                ],
+                                'circle-radius': [
+                                    'step',
+                                    ['get', 'point_count'],
+                                    20,
+                                    100,
+                                    30,
+                                    750,
+                                    40
+                                ]
+                            }
+                        });
+
+                        map.addLayer({
+                            id: 'cluster-count',
+                            type: 'symbol',
+                            source: 'points',
+                            filter: ['has', 'point_count'],
+                            layout: {
+                                'text-field': '{point_count_abbreviated}',
+                                'text-size': 12
+                            }
+                        });
+
+
+                        // Add a layer for unclustered points
+                        map.addLayer({
+                            id: 'unclustered-points',
+                            type: 'circle',
+                            source: 'points',
+                            filter: ['!', ['has', 'point_count']], // this filter is for points that are not in a cluster
+                            paint: {
+                                'circle-color': '#11b4da', // color of the points
+                                'circle-radius': 4, // radius of the points
+                                'circle-stroke-width': 1,
+                                'circle-stroke-color': '#fff'
+                            }
+                        });
+
+                        // ... Add layers for clusters and unclustered points here ...
+                    }
+                } else {
+                    // Clear data when zooming out of city bounds
+                    if (map.getSource("points")) {
+                        map.getSource("points").setData({ type: "FeatureCollection", features: [] });
+                    }
+                }
+            }
+        }
+
+        map.on("load", () => {
+            updateResults();
+            map.on("moveend", updateResults);
+        });
+    </script>
+</body>
+</html>
+<!-- 
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta content="text/html; charset=utf-8" http-equiv="Content-Type"/>
+    <link href="https://unpkg.com/maplibre-gl@2.1.9/dist/maplibre-gl.css" rel="stylesheet" />
+    <script src="https://unpkg.com/maplibre-gl@2.1.9/dist/maplibre-gl.js"></script>
+    <script src="https://unpkg.com/flatgeobuf@3.22.0/dist/flatgeobuf-geojson.min.js"></script>
+    <style>
+        #map { height: 100vh; }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <script type="module">
+        const map = new maplibregl.Map({
+            container: "map",
+            style: "https://api.maptiler.com/maps/backdrop/style.json?key=6jk9aonLicRFoRqvljrc",
+            center: [-114.0719, 51.0447], // Starting at Calgary
+            zoom: 11,
+            maxZoom: 20,
+        });
+
+        const cityBounds = {
+            'Calgary': { minX: -114.316, minY: 50.842, maxX: -113.859, maxY: 51.212 },
+            'Vancouver': { minX: -123.224, minY: 49.198, maxX: -123.022, maxY: 49.316 },
+            'Edmonton': { minX: -113.718, minY: 53.413, maxX: -113.278, maxY: 53.657 }
+        };
+
+        let currentCity = null;
+
+        function isInsideCity(center, cityName) {
+            const bounds = cityBounds[cityName];
+            return center.lng >= bounds.minX && center.lng <= bounds.maxX &&
+                   center.lat >= bounds.minY && center.lat <= bounds.maxY;
+        }
+
+        async function updateResults() {
+            const center = map.getCenter();
+            const zoom = map.getZoom();
+            let newCity = null;
+
+            if (zoom >= 11) {
+                if (isInsideCity(center, 'Calgary')) {
+                    newCity = 'Calgary';
+                } else if (isInsideCity(center, 'Vancouver')) {
+                    newCity = 'Vancouver';
+                } else if (isInsideCity(center, 'Edmonton')) {
+                    newCity = 'Edmonton';
+                }
+            }
+
+            if (newCity !== currentCity) {
+                currentCity = newCity;
+                if (currentCity) {
+                    const url = `https://cif-canada.s3.amazonaws.com/flatgeobuf/${currentCity.toLowerCase()}_no_index.fgb`;
+                    const response = await fetch(url);
+                    const iter = flatgeobuf.deserialize(response.body);
+
+                    if (!map.getSource("points")) {
+                        map.addSource("points", {
+                            type: "geojson",
+                            data: { type: "FeatureCollection", features: [] },
+                            cluster: true,
+                            clusterMaxZoom: 14,
+                            clusterRadius: 50
+                        });
+
+                        map.addLayer({
+                            id: 'clusters',
+                            type: 'circle',
+                            source: 'points',
+                            filter: ['has', 'point_count'],
+                            paint: {
+                                'circle-color': [
+                                    'step',
+                                    ['get', 'point_count'],
+                                    '#51bbd6',
+                                    100,
+                                    '#f1f075',
+                                    750,
+                                    '#f28cb1'
+                                ],
+                                'circle-radius': [
+                                    'step',
+                                    ['get', 'point_count'],
+                                    20,
+                                    100,
+                                    30,
+                                    750,
+                                    40
+                                ]
+                            }
+                        });
+
+                        map.addLayer({
+                            id: 'cluster-count',
+                            type: 'symbol',
+                            source: 'points',
+                            filter: ['has', 'point_count'],
+                            layout: {
+                                'text-field': '{point_count_abbreviated}',
+                                'text-size': 12
+                            }
+                        });
+
+                        map.addLayer({
+                            id: 'unclustered-points',
+                            type: 'circle',
+                            source: 'points',
+                            filter: ['!', ['has', 'point_count']],
+                            paint: {
+                                'circle-color': '#11b4da',
+                                'circle-radius': 4,
+                                'circle-stroke-width': 1,
+                                'circle-stroke-color': '#fff'
+                            }
+                        });
+                    }
+
+                    let batch = [];
+                    for await (let feature of iter) {
+                        batch.push(feature);
+
+                        // Update the map source every 1000 features
+                        if (batch.length >= 200) {
+                            const currentData = map.getSource("points")._data;
+                            currentData.features.push(...batch);
+                            map.getSource("points").setData(currentData);
+                            batch = []; // reset the batch
+                        }
+                    }
+
+                    // Add any remaining features in the last batch
+                    if (batch.length > 0) {
+                        const currentData = map.getSource("points")._data;
+                        currentData.features.push(...batch);
+                        map.getSource("points").setData(currentData);
+                    }
+                } else {
+                    if (map.getSource("points")) {
+                        map.getSource("points").setData({ type: "FeatureCollection", features: [] });
+                    }
+                }
+            }
+        }
+
+        map.on("load", () => {
+            updateResults();
+            map.on("moveend", updateResults);
+        });
+    </script>
+</body>
+</html> -->
